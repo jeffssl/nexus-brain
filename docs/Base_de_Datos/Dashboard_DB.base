@@ -1,0 +1,21 @@
+filters:
+  and:
+    - tipo == "tarea"
+    - departamento == "base_de_datos"
+formulas:
+  priority_label: if(prioridad == 1, "🔴 Alta", if(prioridad == 2, "🟡 Media", if(prioridad == 3, "🟢 Baja", "")))
+properties:
+  estado:
+    displayName: Estado
+  formula.priority_label:
+    displayName: Prioridad
+views:
+  - type: table
+    name: Backlog Base de Datos
+    groupBy:
+      property: estado
+      direction: ASC
+    order:
+      - file.name
+      - estado
+      - formula.priority_label

@@ -1,0 +1,19 @@
+{
+    "entries": [
+        {
+            "path": "./dotnet-skills/plugins/dotnet/skills"
+        },
+        {
+            "path": "./dotnet-skills/plugins/dotnet-data/skills"
+        },
+        {
+            "path": "./dotnet-skills/plugins/dotnet-test/skills"
+        },
+        {
+            "path": "./dotnet-skills/plugins/dotnet-msbuild/skills"
+        },
+        {
+            "path": "./dotnet-skills/plugins/dotnet-advanced/skills"
+        }
+    ]
+}

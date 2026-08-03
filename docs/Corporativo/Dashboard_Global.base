@@ -1,0 +1,43 @@
+filters:
+  and:
+    - 'tipo == "tarea"'
+
+formulas:
+  days_until_due: 'if(fecha_limite, (date(fecha_limite) - today()).days, "")'
+  priority_label: 'if(prioridad == 1, "🔴 Alta", if(prioridad == 2, "🟡 Media", if(prioridad == 3, "🟢 Baja", "")))'
+  dept_label: 'if(departamento == "base_de_datos", "🗄️ Base de Datos", if(departamento == "backend", "⚙️ Backend", if(departamento == "frontend", "🎨 Frontend", departamento)))'
+
+properties:
+  estado:
+    displayName: "Estado"
+  formula.priority_label:
+    displayName: "Prioridad"
+  fecha_limite:
+    displayName: "Fecha Límite"
+  formula.days_until_due:
+    displayName: "Días Restantes"
+  formula.dept_label:
+    displayName: "Departamento"
+
+views:
+  - type: table
+    name: "Visión Global por Departamento"
+    order:
+      - file.name
+      - formula.dept_label
+      - estado
+      - formula.priority_label
+    groupBy:
+      property: formula.dept_label
+      direction: ASC
+      
+  - type: table
+    name: "Todas las Tareas (Por Estado)"
+    order:
+      - file.name
+      - formula.dept_label
+      - estado
+      - formula.priority_label
+    groupBy:
+      property: estado
+      direction: ASC

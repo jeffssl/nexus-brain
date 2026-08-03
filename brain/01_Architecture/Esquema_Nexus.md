@@ -1,0 +1,856 @@
+---
+title: Esquema Nexus
+tipo: arquitectura
+estado: activo
+fecha: 2026-07-31
+tags:
+  - database
+  - schema
+  - dbml
+---
+
+# Esquema Nexus (DBML)
+
+```dbml
+Project Nexus {
+  database_type: 'PostgreSQL'
+  Note: '''
+    Sistema de Agendamiento de Citas Médicas - Versión Mejorada (HealthTech & FHIR)
+    =============================================================================
+    
+    REQUERIMIENTO: PostgreSQL 13+ con extensión pgcrypto
+    
+    Mejoras Arquitectónicas Implementadas:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ✓ UUID v7 para entidades públicas/distribuibles y organizaciones
+    ✓ Alineación total con el estándar HL7 FHIR (Practitioner, Organization, Location, Slot, Schedule)
+    ✓ Inyección de Multi-Tenancy nativa con tenant_id uuid en tablas aisladas
+    ✓ Control de concurrencia con optimistic locking (version int)
+    ✓ Prevención de sobre-reservas mediante notas de Exclusion Constraints en Slots
+    ✓ Separación estricta de PII y PHI en tabla satélite appointment_clinical_details (HIPAA)
+    ✓ Índices parciales para soft deletes declarados
+    ✓ Event sourcing para trazabilidad
+    ✓ Motor de precios versionado
+    ✓ Estricto estándar snake_case para compatibilidad PostgreSQL
+    
+    Modelo Híbrido de IDs (UUID v7 + bigint identity):
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Todas las PK numéricas usan `GENERATED ALWAYS AS IDENTITY`.
+    No usar tipo `serial` o `bigserial`.
+  '''
+}
+
+//////////////////////////////////////////////////////
+//  SYSTEM (Infraestructura del Sistema)
+//////////////////////////////////////////////////////
+
+Table system.users {
+  user_id uuid [pk, default: `uuid_generate_v7()`, note: 'UUID v7 para garantizar unicidad global.']
+  username varchar(100) [not null, unique]
+  email varchar(200) [not null, unique]
+  password_hash varchar(255) [note: 'Hash seguro o null si usa External Provider.']
+  external_provider_id varchar(200) [note: 'ID en Firebase/Keycloak/Auth0.']
+  full_name varchar(200) [not null]
+  user_type varchar(30) [not null, note: 'ADMIN, OPERATOR, DOCTOR, PATIENT, SYSTEM.']
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  created_by uuid [ref: > system.users.user_id]
+  updated_at timestamptz
+  updated_by uuid [ref: > system.users.user_id]
+  deleted_at timestamptz
+  deleted_by uuid [ref: > system.users.user_id]
+  
+  Indexes {
+    (email) [unique, note: 'Parcial: WHERE deleted_at IS NULL']
+    (user_type)
+    (is_active) [name: "idx_users_active"]
+  }
+}
+
+Table system.audit_logs {
+  audit_log_id uuid [pk, default: `uuid_generate_v7()`, note: 'UUID v7 preserva ordenamiento.']
+  table_name varchar(100) [not null]
+  record_id varchar(100) [not null]
+  operation varchar(10) [not null, note: 'INSERT, UPDATE, DELETE.']
+  user_id uuid [ref: > system.users.user_id]
+  operated_at timestamptz [not null, default: 'now()']
+  old_values jsonb
+  new_values jsonb
+  ip_address inet
+  user_agent varchar(500)
+  
+  Indexes {
+    (table_name, record_id, operated_at)
+    (user_id, operated_at)
+    (operated_at)
+  }
+}
+
+Table system.configurations {
+  config_key varchar(100) [pk]
+  config_value text [not null]
+  data_type varchar(20) [not null, default: 'STRING']
+  description varchar(500)
+  created_at timestamptz [not null, default: 'now()']
+  created_by uuid [ref: > system.users.user_id]
+  updated_at timestamptz
+  updated_by uuid [ref: > system.users.user_id]
+}
+
+//////////////////////////////////////////////////////
+//  GEOGRAPHIC (Geografía Simplificada)
+//////////////////////////////////////////////////////
+
+Table geographic.countries {
+  country_id int [pk]
+  country_code char(2) [not null, unique]
+  iso3_code char(3) [not null, unique]
+  name varchar(150) [not null]
+  phone_code varchar(5)
+  is_active boolean [not null, default: true]
+}
+
+Table geographic.states {
+  state_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  country_id int [not null, ref: > geographic.countries.country_id]
+  code varchar(10) [not null]
+  name varchar(150) [not null]
+  is_active boolean [not null, default: true]
+  
+  Indexes {
+    (country_id, code) [unique]
+  }
+}
+
+Table geographic.cities {
+  city_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  state_id int [not null, ref: > geographic.states.state_id]
+  code varchar(10)
+  name varchar(150) [not null]
+  is_active boolean [not null, default: true]
+  
+  Indexes {
+    (state_id, code) [unique]
+  }
+}
+
+Table system.contact_types {
+  contact_type_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  code varchar(30) [not null, unique]
+  name varchar(100) [not null]
+  validation_regex varchar(500)
+  is_active boolean [not null, default: true]
+}
+
+Table practitioner.specialty_categories {
+  category_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  code varchar(30) [not null, unique]
+  name_es varchar(100) [not null]
+  name_en varchar(100) [not null]
+  is_active boolean [not null, default: true]
+}
+
+Table practitioner.specialties {
+  specialty_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  category_id int [not null, ref: > practitioner.specialty_categories.category_id]
+  snomed_code varchar(20) [not null, unique]
+  name_es varchar(150) [not null]
+  name_en varchar(150) [not null]
+  is_active boolean [not null, default: true]
+}
+
+Table pricing.services {
+  service_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  code varchar(50) [not null, unique]
+  name varchar(150) [not null]
+  description varchar(250)
+  default_duration_minutes smallint
+  requires_pre_auth boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+}
+
+Table appointment.appointment_statuses {
+  status_code varchar(30) [pk, note: 'HELD, PENDING_PAYMENT, CONFIRMED, ARRIVED, IN_TRIAGE, IN_CONSULTATION, COMPLETED, CANCELLED, NO_SHOW, EXPIRED.']
+  name varchar(100) [not null]
+  description varchar(250)
+  is_final boolean [not null, default: false]
+  allowed_transitions varchar(500) [note: 'JSON array.']
+}
+
+Table appointment.cancellation_reasons {
+  reason_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  code varchar(40) [not null, unique]
+  name varchar(120) [not null]
+  applies_to_status varchar(30)
+  requires_refund boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+}
+
+Table billing.payment_statuses {
+  status_code varchar(30) [pk]
+  name varchar(100) [not null]
+  is_final boolean [not null, default: false]
+}
+
+Table billing.payment_methods {
+  method_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  code varchar(30) [not null, unique]
+  name varchar(100) [not null]
+  requires_gateway boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+}
+
+Table pricing.currencies {
+  currency_code char(3) [pk]
+  name varchar(80) [not null]
+  symbol varchar(10)
+  decimal_places smallint [not null, default: 2]
+}
+
+Table billing.refund_statuses {
+  status_code varchar(30) [pk]
+  name varchar(100) [not null]
+  description varchar(250)
+  is_final boolean [not null, default: false]
+}
+
+//////////////////////////////////////////////////////
+//  ORGANIZATION (Prestadores y Sucursales - FHIR)
+//////////////////////////////////////////////////////
+
+Table organization.organization_types {
+  type_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  code varchar(30) [not null, unique]
+  name varchar(100) [not null]
+  is_active boolean [not null, default: true]
+}
+
+Table organization.organizations {
+  organization_id uuid [pk, default: `uuid_generate_v7()`, note: 'UUID v7. Representa al Tenant principal (Hospital/Clínica).']
+  legal_name varchar(200) [not null]
+  trade_name varchar(200)
+  document_type_id int [ref: > geographic.document_types.type_id]
+  tax_id varchar(30) [unique]
+  organization_type_id int [not null, ref: > organization.organization_types.type_id]
+  country_id int [not null, ref: > geographic.countries.country_id]
+  website varchar(200)
+  logo_url varchar(500)
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  updated_at timestamptz
+  deleted_at timestamptz
+}
+
+Table organization.locations {
+  location_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  organization_id uuid [not null, ref: > organization.organizations.organization_id, note: 'Asociación directa al Tenant.']
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'FK para políticas RLS.']
+  name varchar(200) [not null, note: 'Sede Norte, Laboratorio Central.']
+  code varchar(50)
+  is_head_office boolean [not null, default: false]
+  timezone varchar(50) [not null, default: 'America/Guayaquil']
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  updated_at timestamptz
+  deleted_at timestamptz
+  
+  Indexes {
+    (organization_id, code) [unique, note: 'Parcial: WHERE deleted_at IS NULL']
+  }
+}
+
+Table organization.location_addresses {
+  address_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  location_id int [not null, ref: > organization.locations.location_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  city_id int [not null, ref: > geographic.cities.city_id]
+  address_line_1 varchar(200) [not null]
+  address_line_2 varchar(200)
+  neighborhood varchar(150)
+  postal_code varchar(20)
+  reference varchar(250)
+  latitude decimal(10,7) [not null]
+  longitude decimal(10,7) [not null]
+  is_primary boolean [not null, default: true]
+  is_active boolean [not null, default: true]
+}
+
+Table organization.location_contacts {
+  contact_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  location_id int [not null, ref: > organization.locations.location_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  contact_type_id int [not null, ref: > system.contact_types.contact_type_id]
+  contact_value varchar(100) [not null]
+  purpose varchar(100)
+  is_primary boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+}
+
+Table organization.location_specialties {
+  location_specialty_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  location_id int [not null, ref: > organization.locations.location_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  specialty_id int [not null, ref: > practitioner.specialties.specialty_id]
+  is_active boolean [not null, default: true]
+  activated_at timestamptz [not null, default: 'now()']
+  
+  Indexes {
+    (location_id, specialty_id) [unique]
+  }
+}
+
+//////////////////////////////////////////////////////
+//  FACILITY (Salas y Equipos)
+//////////////////////////////////////////////////////
+
+Table facility.rooms {
+  room_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  location_id int [not null, ref: > organization.locations.location_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  name varchar(100) [not null, note: 'Box 1, Consultorio A, Quirófano 2.']
+  room_type varchar(50) [not null, note: 'CONSULTATION, PROCEDURE, SURGERY, TRIAGE.']
+  capacity smallint [not null, default: 1]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  updated_at timestamptz
+  
+  Indexes {
+    (location_id, room_type)
+  }
+}
+
+Table facility.equipments {
+  equipment_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  location_id int [not null, ref: > organization.locations.location_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  room_id bigint [ref: > facility.rooms.room_id, note: 'Si está fijo en una sala.']
+  name varchar(150) [not null, note: 'Ecógrafo 3D, Máquina Rayos X.']
+  serial_number varchar(100)
+  requires_maintenance boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+}
+
+//////////////////////////////////////////////////////
+//  PRACTITIONER (Profesionales de Salud - FHIR)
+//////////////////////////////////////////////////////
+
+Table geographic.document_types {
+  type_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  code varchar(30) [not null, unique]
+  name varchar(100) [not null]
+  country_id int [ref: > geographic.countries.country_id]
+  validation_regex varchar(500)
+  is_active boolean [not null, default: true]
+}
+
+Table practitioner.practitioners {
+  practitioner_id uuid [pk, default: `uuid_generate_v7()`]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'Aislamiento RLS por Tenant']
+  document_type_id int [not null, ref: > geographic.document_types.type_id]
+  document_number varchar(30) [not null]
+  first_name varchar(100) [not null]
+  last_name varchar(100) [not null]
+  medical_license varchar(50) [unique]
+  user_id uuid [ref: > system.users.user_id]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  created_by uuid [ref: > system.users.user_id]
+  updated_at timestamptz
+  updated_by uuid [ref: > system.users.user_id]
+  deleted_at timestamptz
+  
+  Indexes {
+    (document_type_id, document_number) [unique, note: 'Parcial: WHERE deleted_at IS NULL']
+    (last_name, first_name)
+    (is_active) [name: "idx_practitioner_active"]
+  }
+}
+
+Table practitioner.practitioner_contacts {
+  practitioner_contact_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  practitioner_id uuid [not null, ref: > practitioner.practitioners.practitioner_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  contact_type_id int [not null, ref: > system.contact_types.contact_type_id]
+  contact_value varchar(100) [not null]
+  purpose varchar(100)
+  is_primary boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+}
+
+Table practitioner.practitioner_specialties {
+  practitioner_specialty_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  practitioner_id uuid [not null, ref: > practitioner.practitioners.practitioner_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  specialty_id int [not null, ref: > practitioner.specialties.specialty_id]
+  is_primary boolean [not null, default: false]
+  certification_date date
+  is_active boolean [not null, default: true]
+  
+  Indexes {
+    (practitioner_id, specialty_id) [unique]
+  }
+}
+
+Table practitioner.practitioner_locations {
+  practitioner_location_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  practitioner_id uuid [not null, ref: > practitioner.practitioners.practitioner_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  location_id int [not null, ref: > organization.locations.location_id]
+  is_primary boolean [not null, default: false]
+  start_date date [not null]
+  end_date date
+  is_active boolean [not null, default: true]
+  
+  Indexes {
+    (practitioner_id, location_id) [unique]
+  }
+}
+
+//////////////////////////////////////////////////////
+//  PATIENT (Pacientes y Dependientes - FHIR)
+//////////////////////////////////////////////////////
+
+Table patient.patients {
+  patient_id uuid [pk, default: `uuid_generate_v7()`]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'Aislamiento RLS por Tenant']
+  document_type_id int [not null, ref: > geographic.document_types.type_id]
+  document_number varchar(30) [not null]
+  first_name varchar(100) [not null]
+  middle_name varchar(100)
+  last_name varchar(100) [not null]
+  second_last_name varchar(100)
+  birth_date date
+  gender varchar(20)
+  
+  user_id uuid [ref: > system.users.user_id, note: 'Si tiene acceso web propio.']
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  created_by uuid [ref: > system.users.user_id]
+  updated_at timestamptz
+  updated_by uuid [ref: > system.users.user_id]
+  deleted_at timestamptz
+  
+  Indexes {
+    (document_type_id, document_number) [unique, note: 'Parcial: WHERE deleted_at IS NULL']
+    (last_name, first_name)
+  }
+}
+
+Table patient.patient_relations {
+  relation_id uuid [pk, default: `uuid_generate_v7()` ]
+  primary_patient_id uuid [not null, ref: > patient.patients.patient_id, note: 'Tutor / Representante principal']
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  dependent_patient_id uuid [not null, ref: > patient.patients.patient_id, note: 'Hijo, adulto mayor, etc.']
+  relationship_type varchar(50) [not null, note: 'PARENT, CHILD, SPOUSE, LEGAL_GUARDIAN.']
+  can_book_appointments boolean [not null, default: true]
+  can_access_medical_records boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  
+  Indexes {
+    (primary_patient_id, dependent_patient_id) [unique]
+  }
+}
+
+Table patient.patient_contacts {
+  patient_contact_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  patient_id uuid [not null, ref: > patient.patients.patient_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  contact_type_id int [not null, ref: > system.contact_types.contact_type_id]
+  contact_value varchar(100) [not null]
+  purpose varchar(100)
+  is_primary boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+}
+
+Table patient.patient_addresses {
+  address_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  patient_id uuid [not null, ref: > patient.patients.patient_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  city_id int [not null, ref: > geographic.cities.city_id]
+  address_line_1 varchar(200) [not null]
+  address_line_2 varchar(200)
+  postal_code varchar(20)
+  is_primary boolean [not null, default: true]
+  is_active boolean [not null, default: true]
+}
+
+Table patient.patient_consents {
+  consent_id uuid [pk, default: `uuid_generate_v7()`]
+  patient_id uuid [not null, ref: > patient.patients.patient_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  appointment_id uuid [note: 'Si está ligado a una cita específica.']
+  consent_type varchar(50) [not null, note: 'DATA_PRIVACY, MEDICAL_PROCEDURE, TELEHEALTH.']
+  document_url varchar(500) [note: 'URL del PDF firmado.']
+  agreed_at timestamptz [not null, default: 'now()']
+  ip_address inet
+  is_active boolean [not null, default: true]
+}
+
+//////////////////////////////////////////////////////
+//  INSURANCE (Seguros y Coberturas)
+//////////////////////////////////////////////////////
+
+Table insurance.coverage_types {
+  type_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  code varchar(20) [not null, unique]
+  name varchar(100) [not null]
+  is_active boolean [not null, default: true]
+}
+
+Table insurance.payers {
+  payer_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  coverage_type_id int [not null, ref: > insurance.coverage_types.type_id]
+  country_id int [not null, ref: > geographic.countries.country_id]
+  code varchar(50) [not null, unique]
+  name varchar(200) [not null]
+  tax_id varchar(30)
+  is_active boolean [not null, default: true]
+}
+
+Table insurance.plans {
+  plan_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  payer_id int [not null, ref: > insurance.payers.payer_id]
+  code varchar(50) [not null]
+  name varchar(200) [not null]
+  description varchar(500)
+  coverage_percentage decimal(5,2)
+  requires_pre_auth boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  
+  Indexes {
+    (payer_id, code) [unique]
+  }
+}
+
+Table insurance.payer_provider_networks {
+  network_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  payer_id int [not null, ref: > insurance.payers.payer_id]
+  organization_id uuid [not null, ref: > organization.organizations.organization_id]
+  contract_code varchar(80)
+  valid_from date [not null]
+  valid_to date
+  is_active boolean [not null, default: true]
+  
+  Indexes {
+    (payer_id, organization_id, valid_from) [unique]
+  }
+}
+
+Table patient.patient_insurances {
+  patient_insurance_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  patient_id uuid [not null, ref: > patient.patients.patient_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  payer_id int [not null, ref: > insurance.payers.payer_id]
+  plan_id int [ref: > insurance.plans.plan_id]
+  member_number varchar(60)
+  policy_number varchar(60)
+  valid_from date [not null]
+  valid_to date
+  is_primary boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  updated_at timestamptz
+}
+
+//////////////////////////////////////////////////////
+//  SCHEDULING (Agendamiento - FHIR)
+//////////////////////////////////////////////////////
+
+Table scheduling.weekdays {
+  weekday_id smallint [pk]
+  code varchar(3) [not null, unique]
+  name varchar(30) [not null]
+}
+
+Table scheduling.practitioner_schedules {
+  schedule_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  practitioner_id uuid [not null, ref: > practitioner.practitioners.practitioner_id]
+  location_specialty_id int [not null, ref: > organization.location_specialties.location_specialty_id]
+  room_id bigint [ref: > facility.rooms.room_id, note: 'Sala preferida asignada en este horario.']
+  weekday_id smallint [not null, ref: > scheduling.weekdays.weekday_id]
+  start_time time [not null]
+  end_time time [not null]
+  slot_duration_minutes smallint [not null, default: 30]
+  max_patients_per_slot smallint [not null, default: 1]
+  valid_from date [not null]
+  valid_to date
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  updated_at timestamptz
+}
+
+Table scheduling.schedule_exceptions {
+  exception_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  schedule_id bigint [ref: > scheduling.practitioner_schedules.schedule_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  practitioner_id uuid [not null, ref: > practitioner.practitioners.practitioner_id]
+  location_specialty_id int [ref: > organization.location_specialties.location_specialty_id]
+  exception_date date [not null]
+  is_closed boolean [not null, default: true]
+  override_start_time time
+  override_end_time time
+  reason varchar(250)
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+}
+
+Table scheduling.slots {
+  slot_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  practitioner_id uuid [not null, ref: > practitioner.practitioners.practitioner_id]
+  location_specialty_id int [not null, ref: > organization.location_specialties.location_specialty_id]
+  room_id bigint [ref: > facility.rooms.room_id, note: 'Recurso físico bloqueado.']
+  slot_start_at timestamptz [not null]
+  slot_end_at timestamptz [not null]
+  max_capacity smallint [not null, default: 1]
+  reservation_status varchar(20) [not null, default: 'HELD']
+  held_until timestamptz
+  version int [not null, default: 1]
+  created_at timestamptz [not null, default: 'now()']
+  
+  Indexes {
+    (practitioner_id, slot_start_at) [unique, note: 'Postgres requiere EXCLUDE USING gist (practitioner_id WITH =, tstzrange(slot_start_at, slot_end_at) WITH &&) para evitar solapamientos.']
+    (room_id, slot_start_at) [unique, note: 'Postgres requiere EXCLUDE USING gist (room_id WITH =, tstzrange(slot_start_at, slot_end_at) WITH &&) para evitar solapamientos de sala.']
+  }
+}
+
+Table scheduling.waitlists {
+  waitlist_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  patient_id uuid [not null, ref: > patient.patients.patient_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  practitioner_id uuid [ref: > practitioner.practitioners.practitioner_id]
+  specialty_id int [not null, ref: > practitioner.specialties.specialty_id]
+  preferred_date_from date [not null]
+  preferred_date_to date [not null]
+  status varchar(20) [not null, default: 'ACTIVE', note: 'ACTIVE, NOTIFIED, BOOKED, EXPIRED.']
+  created_at timestamptz [not null, default: 'now()']
+  updated_at timestamptz
+}
+
+//////////////////////////////////////////////////////
+//  APPOINTMENTS (Citas)
+//////////////////////////////////////////////////////
+
+Table appointment.appointments {
+  appointment_id uuid [pk, default: `uuid_generate_v7()`]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  appointment_number varchar(50) [not null, unique]
+  
+  patient_id uuid [not null, ref: > patient.patients.patient_id]
+  practitioner_id uuid [not null, ref: > practitioner.practitioners.practitioner_id]
+  location_id int [not null, ref: > organization.locations.location_id]
+  specialty_id int [not null, ref: > practitioner.specialties.specialty_id]
+  service_id int [not null, ref: > pricing.services.service_id]
+  
+  slot_id bigint [not null, ref: > scheduling.slots.slot_id]
+  
+  appointment_date date [not null]
+  start_at timestamptz [not null]
+  end_at timestamptz [not null]
+  
+  status_code varchar(30) [not null, ref: > appointment.appointment_statuses.status_code]
+  
+  is_telehealth boolean [not null, default: false]
+  
+  patient_insurance_id bigint [ref: > patient.patient_insurances.patient_insurance_id]
+  requires_pre_auth boolean [not null, default: false]
+  pre_auth_code varchar(50)
+  
+  booked_by_user_id uuid [ref: > system.users.user_id]
+  booking_channel varchar(30)
+  
+  arrived_at timestamptz
+  seen_at timestamptz
+  completed_at timestamptz
+  
+  cancelled_at timestamptz
+  cancellation_reason_id int [ref: > appointment.cancellation_reasons.reason_id]
+  cancellation_notes varchar(500)
+  
+  version int [not null, default: 1]
+  created_at timestamptz [not null, default: 'now()']
+  created_by uuid [ref: > system.users.user_id]
+  updated_at timestamptz
+  updated_by uuid [ref: > system.users.user_id]
+  
+  Indexes {
+    (appointment_number) [unique]
+    (patient_id, appointment_date)
+    (practitioner_id, appointment_date)
+    (slot_id) [unique]
+  }
+}
+
+// NUEVA TABLA (Separación HIPAA PII/PHI)
+Table appointment.appointment_clinical_details {
+  clinical_detail_id uuid [pk, default: `uuid_generate_v7()`]
+  appointment_id uuid [not null, ref: > appointment.appointments.appointment_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  patient_notes text [note: 'PHI sensible cifrado a nivel de aplicación (ej. síntomas, motivos).']
+  internal_notes text [note: 'PHI sensible cifrado a nivel de aplicación (ej. diagnóstico preliminar).']
+  created_at timestamptz [not null, default: 'now()']
+  created_by uuid [ref: > system.users.user_id]
+  updated_at timestamptz
+  updated_by uuid [ref: > system.users.user_id]
+}
+
+Table appointment.telehealth_sessions {
+  session_id uuid [pk, default: `uuid_generate_v7()`]
+  appointment_id uuid [not null, ref: > appointment.appointments.appointment_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  meeting_url varchar(500) [not null]
+  host_token varchar(200)
+  guest_token varchar(200)
+  status varchar(30) [not null, default: 'SCHEDULED', note: 'SCHEDULED, IN_PROGRESS, COMPLETED.']
+  started_at timestamptz
+  ended_at timestamptz
+  created_at timestamptz [not null, default: 'now()']
+  updated_at timestamptz
+  
+  Indexes {
+    (appointment_id) [unique]
+  }
+}
+
+Table appointment.appointment_histories {
+  history_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  appointment_id uuid [not null, ref: > appointment.appointments.appointment_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  changed_at timestamptz [not null, default: 'now()']
+  changed_by_user_id uuid [ref: > system.users.user_id]
+  change_type varchar(20) [not null]
+  old_value jsonb
+  new_value jsonb
+  notes varchar(500)
+}
+
+//////////////////////////////////////////////////////
+//  PRICING (Motor de Precios)
+//////////////////////////////////////////////////////
+
+Table pricing.price_lists {
+  price_list_id int [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  code varchar(50) [not null, unique]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  name varchar(150) [not null]
+  description varchar(500)
+  is_default boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  updated_at timestamptz
+}
+
+Table pricing.service_prices {
+  service_price_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  price_list_id int [not null, ref: > pricing.price_lists.price_list_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  location_id int [ref: > organization.locations.location_id]
+  specialty_id int [ref: > practitioner.specialties.specialty_id]
+  service_id int [not null, ref: > pricing.services.service_id]
+  practitioner_id uuid [ref: > practitioner.practitioners.practitioner_id]
+  
+  price decimal(18,2) [not null]
+  currency_code char(3) [not null, ref: > pricing.currencies.currency_code]
+  
+  valid_from date [not null]
+  valid_to date
+  
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null, default: 'now()']
+  updated_at timestamptz
+  deleted_at timestamptz
+}
+
+//////////////////////////////////////////////////////
+//  BILLING & PAYMENTS (Facturación y Pagos)
+//////////////////////////////////////////////////////
+
+Table billing.invoices {
+  invoice_id uuid [pk, default: `uuid_generate_v7()`]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  invoice_number varchar(50) [not null, unique]
+  appointment_id uuid [not null, ref: > appointment.appointments.appointment_id]
+  patient_id uuid [not null, ref: > patient.patients.patient_id]
+  
+  issue_date date [not null, default: 'CURRENT_DATE']
+  due_date date
+  
+  subtotal decimal(18,2) [not null]
+  tax decimal(18,2) [not null, default: 0]
+  discount decimal(18,2) [not null, default: 0]
+  total decimal(18,2) [not null]
+  currency_code char(3) [not null, ref: > pricing.currencies.currency_code]
+  
+  status_code varchar(30) [not null]
+  
+  notes text
+  created_at timestamptz [not null, default: 'now()']
+  created_by uuid [ref: > system.users.user_id]
+  updated_at timestamptz
+  updated_by uuid [ref: > system.users.user_id]
+}
+
+Table billing.invoice_line_items {
+  line_item_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  invoice_id uuid [not null, ref: > billing.invoices.invoice_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  service_id int [not null, ref: > pricing.services.service_id]
+  description varchar(500) [not null]
+  quantity decimal(10,2) [not null, default: 1]
+  unit_price decimal(18,2) [not null]
+  subtotal decimal(18,2) [not null]
+  tax decimal(18,2) [not null, default: 0]
+  total decimal(18,2) [not null]
+}
+
+Table billing.payments {
+  payment_id uuid [pk, default: `uuid_generate_v7()`]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  payment_number varchar(50) [not null, unique]
+  invoice_id uuid [not null, ref: > billing.invoices.invoice_id]
+  
+  amount decimal(18,2) [not null]
+  currency_code char(3) [not null, ref: > pricing.currencies.currency_code]
+  
+  payment_method_id int [not null, ref: > billing.payment_methods.method_id]
+  status_code varchar(30) [not null, ref: > billing.payment_statuses.status_code]
+  
+  transaction_reference varchar(200)
+  processed_at timestamptz
+  
+  patient_insurance_id bigint [ref: > patient.patient_insurances.patient_insurance_id]
+  
+  notes text
+  created_at timestamptz [not null, default: 'now()']
+  created_by uuid [ref: > system.users.user_id]
+}
+
+Table billing.refunds {
+  refund_id bigint [pk, note: 'GENERATED ALWAYS AS IDENTITY']
+  payment_id uuid [not null, ref: > billing.payments.payment_id]
+  tenant_id uuid [not null, ref: > organization.organizations.organization_id, note: 'RLS']
+  amount decimal(18,2) [not null]
+  currency_code char(3) [not null, ref: > pricing.currencies.currency_code]
+  reason varchar(500) [not null]
+  processed_at timestamptz
+  transaction_reference varchar(200)
+  status_code varchar(30) [not null, ref: > billing.refund_statuses.status_code] 
+  created_at timestamptz [not null, default: 'now()']
+  created_by uuid [ref: > system.users.user_id]
+}
+
+//////////////////////////////////////////////////////
+//  ARCHIVE (Archivado de Datos Históricos)
+//////////////////////////////////////////////////////
+
+Table archive.appointment_archives {
+  appointment_id uuid [pk]
+  archived_at timestamptz [not null, default: 'now()']
+  archived_by_user_id uuid [ref: > system.users.user_id]
+  original_data jsonb [not null]
+}
+
+```

@@ -1,0 +1,53 @@
+# Operating System
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Subdirectorios de código fuente (repositorios independientes)
+src/
+
+# Environments & Python
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Editors & IDEs
+.idea/
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.DotSettings.user
+*.suo
+*.swp
+*~
+
+# Obsidian Vault Runtime State (brain/)
+brain/.obsidian/workspace*.json
+brain/.obsidian/cache/
+brain/.obsidian/sync/
+brain/.obsidian/backups/
+brain/.trash/
+.obsidian/workspace*.json
+.obsidian/cache/
+.obsidian/sync/
+.trash/
+
+# Logs & Temporary files
+*.log
+*.tmp
+*.bak

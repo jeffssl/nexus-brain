@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+        "dbdiagramflow": {
+            "type": "http",
+            "url": "https://dbdiagramflow.com/api/mcp",
+            "headers": {
+                "Authorization": "Bearer dbf_DjIAyXmG6j4Reyb-juvKbUH6k6I0gD76lnq2iGzyaBc"
+            }
+        }
+    }
+}
