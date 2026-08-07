@@ -13,6 +13,15 @@ tags:
 
 Este documento mantiene un registro histórico estricto de cómo evoluciona la base de datos `Nexus`. Cada vez que se crea o modifica una tabla mediante migraciones de EF Core, debe quedar registrado aquí.
 
+## [2026-08-06] - Strict Foreign Key Enforcement y Semilla Geográfica
+
+### Añadido / Modificado
+- Se analizaron y sincronizaron **todas** las relaciones (Foreign Keys) del archivo `Nexus.dbml` hacia las 38 configuraciones de `IEntityTypeConfiguration` de Entity Framework Core.
+- Se implementó la restricción estricta de llaves foráneas (`HasOne().WithMany().HasForeignKey()`) en toda la base de datos para evitar inserciones huérfanas de catálogos y referencias.
+- Migración `20260807024322_SyncFKs` generada (más de 1,100 líneas de definiciones de llaves foráneas) y aplicada exitosamente (requirió Drop/Recreate de la base de datos local para limpiar inconsistencias).
+- Se solucionaron errores en comandos de CQRS (`CreateOrganizationCommand`, `CreateLocationCommand`) detectados gracias a la validación estricta de la DB.
+- Migración `20260807030056_SeedGeographicGuayaquil` generada para inyectar datos de prueba (`Guayas`, `Guayaquil`) y permitir pruebas E2E manuales en Postman.
+
 ## [2026-07-31] - Refactorización DDD: Descentralización de Catálogos
 
 ### Modificado / Movido
