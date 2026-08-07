@@ -5,7 +5,7 @@ Estas reglas aplican de forma obligatoria para todos los agentes y subagentes qu
 ## 1. Rol de Arquitecto de Base de Datos (HealthTech)
 Cada vez que se propongan cambios, adiciones, análisis sobre los esquemas de bases de datos, el diccionario de datos o archivos de base de datos (`.base`), el agente debe:
 - Cargar y aplicar obligatoriamente las siguientes skills:
-  - [health-tech-db-architect](file:///Users/jeff/Documents/Agendamiento-clinicas-laboratorios/.agents/skills/health-tech-db-architect/SKILL.md): Para el modelado de dominio de salud (HL7 FHIR), seguridad, concurrencia, HIPAA/LOPDP, multi-tenancy RLS y auditoría.
+  - [health-tech-db-architect](file:///Users/jeff/Documents/Agendamiento-clinicas-laboratorios/.agents/agents/health-tech-db-architect/agent.md): Para el modelado de dominio de salud (HL7 FHIR), seguridad, concurrencia, HIPAA/LOPDP, multi-tenancy RLS y auditoría.
   - [postgres-pro](file:///Users/jeff/Documents/Agendamiento-clinicas-laboratorios/.agents/skills/postgres-pro/SKILL.md): Para las convenciones de diseño físico (snake_case, plurales, UUIDs, TIMESTAMPTZ) y optimizaciones de base de datos.
 - Adoptar la mentalidad de un **Lead Healthcare Database Architect** y **DBRE**.
 - Priorizar la interoperabilidad, la seguridad de datos de salud y el rendimiento concurrente.
@@ -21,8 +21,8 @@ Es CRÍTICO y OBLIGATORIO mantener sincronizado el modelo de base de datos con l
 
 ## 3. Rol de Arquitecto Backend .NET (HealthTech)
 Cada vez que se trabaje en la configuración, arquitectura o desarrollo de código backend en C# / .NET, el agente debe:
-- Cargar y aplicar obligatoriamente la skill:
-  - [health-tech-dotnet-architect](file:///Users/jeff/Documents/Agendamiento-clinicas-laboratorios/.agents/skills/health-tech-dotnet-architect/SKILL.md): Para los principios de Clean Architecture, CQRS, modelado FHIR, EF Core y concurrencia.
+- Cargar y aplicar obligatoriamente el subagente:
+  - [health-tech-dotnet-architect](file:///Users/jeff/Documents/Agendamiento-clinicas-laboratorios/.agents/agents/health-tech-dotnet-architect/agent.md): Para los principios de Clean Architecture, CQRS, modelado FHIR, EF Core y concurrencia.
 - Aprovechar de forma activa los skills oficiales de .NET (plugins como `dotnet`, `dotnet-data`, `dotnet-test`) integrados en el `skills.json`.
 - Utilizar de forma proactiva el servidor MCP **postman-mcp-server** para crear colecciones, entornos y probar las APIs (End-to-End) de forma automática.
 - Garantizar que la integración con la base de datos asuma el entorno multi-tenant y se aprovechen los mecanismos de PostgreSQL (RLS, JSONB, UUIDv7).
@@ -36,3 +36,10 @@ Es obligatorio que todo agente actúe como un **Knowledge Manager** para persist
 - Para gestionar este directorio, el agente **DEBE** usar de forma conjunta las skills **`obsidian-markdown`** y **`obsidian-bases`**.
 - Cada nueva nota o actualización en `brain/` debe ser **Atómica**, estar categorizada con **Tags** y YAML frontmatter, y estar conectada al resto del cerebro usando **enlaces bidireccionales (`[[ ]]`)**.
 - Los índices o Mapas de Contenido (MOCs) en `brain/00_MOCs/` deben actualizarse constantemente para que el grafo de conocimiento nunca tenga notas "huérfanas".
+
+## 6. Ubicación y Estructura de Subagentes
+- A partir de ahora, la ubicación estándar para la definición e instrucciones de todos los subagentes dentro del espacio de trabajo será:
+  - **`.agents/agents/<name>/agent.md`** (donde `<name>` es el identificador o nombre del subagente).
+- Cada subagente debe contar con su archivo `agent.md` correspondiente describiendo su rol, responsabilidades, herramientas asignadas y flujos de trabajo específicos.
+
+
