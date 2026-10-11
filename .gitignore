@@ -51,3 +51,6 @@ brain/.trash/
 *.log
 *.tmp
 *.bak
+
+# DB local secrets
+infra/database/.env

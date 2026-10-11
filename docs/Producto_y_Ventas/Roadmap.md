@@ -31,3 +31,15 @@ status: in-progress
 ## Fase 4: Autenticación Externa y Escalado
 - [ ] Integración de OAuth (Google, Microsoft, Apple)
 - [ ] Optimización de lectura (Vistas materializadas / Redis)
+
+## Fase 3: Re-cimentación Data-First (2026-10-04)
+Detalle en [[Roadmap_Data_First]] (auditoría: [[Auditoria_Nexus_DBML_2026-10-04]]).
+- [x] Auditoría de `Nexus.dbml`
+- [x] Decisión: SQL versionado como fuente de verdad
+- [x] F0 Decisiones y fundamentos (ADRs, `infra/database/`, reglas actualizadas)
+- [ ] F1 Plataforma BD (roles, RLS, DbUp, Testcontainers)
+- [ ] F2 Tenancy e identidad
+- [ ] F3 Catálogos
+- [ ] F4 Profesionales y pacientes
+- [ ] F5 Agendamiento (EXCLUDE + concurrencia)
+- [ ] F6 Laboratorio · F7 Facturación · F8 Auditoría/Outbox · F9 Hardening

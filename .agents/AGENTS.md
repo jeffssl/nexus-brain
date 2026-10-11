@@ -43,3 +43,10 @@ Es obligatorio que todo agente actúe como un **Knowledge Manager** para persist
 - Cada subagente debe contar con su archivo `agent.md` correspondiente describiendo su rol, responsabilidades, herramientas asignadas y flujos de trabajo específicos.
 
 
+
+## 7. Fuente de Verdad del Esquema: Data-First (SQL versionado)
+- A partir del 2026-10-11 la **única fuente de verdad del esquema** son las migraciones SQL en **`infra/database/migrations/*.sql`** (DbUp, forward-only, inmutables). Está fuera de `src/` porque `src/` está en `.gitignore`.
+- **EF Core solo mapea**; no se generan migraciones con `dotnet ef`. La migración EF `Initial` se descarta.
+- Los archivos **DBML son artefactos generados** desde la base real (`db2dbml`); nunca se editan a mano ni se usan para decidir el esquema.
+- Toda tabla debe cumplir las convenciones de `infra/database/conventions.md` y el *Definition of Done* de `brain/01_Architecture/Roadmap_Data_First.md`.
+- Las reglas de los puntos 1 y 2 aplican igual, sustituyendo "migración EF" por "migración SQL". Decisiones registradas como ADR en `brain/01_Architecture/ADR/`.

@@ -84,3 +84,8 @@ Se materializaron los esquemas lógicos en tablas físicas en PostgreSQL.
 ### 🛡️ Políticas Aplicadas
 - **Soft Deletes**: Todas las tablas principales incluyen `deleted_at` (TIMESTAMPTZ).
 - **Convenciones**: Todas las tablas y columnas usan `snake_case`.
+
+
+## 2026-10-04 — Auditoría y cambio de estrategia
+- Sin cambios de esquema físico. Auditoría de `Nexus.dbml`: [[Auditoria_Nexus_DBML_2026-10-04]].
+- Decisión: Data-First; se descartará la migración EF `Initial` y el DBML pasa a ser generado. Ver [[Roadmap_Data_First]].
